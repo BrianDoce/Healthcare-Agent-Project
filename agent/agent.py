@@ -84,8 +84,12 @@ def _format_result(res) -> str:
 
 
 def run_agent(question: str, db: SafeDB, client, model: str = DEFAULT_MODEL, max_steps: int = 8,
-              effort: str = "medium", use_fallbacks: bool = False) -> AgentResult:
-    """Answer one question. `client` is an anthropic.Anthropic (or a test double)."""
+              effort: str = "medium", use_fallbacks: bool = False,
+              schema_mode: str = "full") -> AgentResult:
+    """Answer one question. `client` is an anthropic.Anthropic (or a test double).
+
+    schema_mode: "full" gives the model schema.md (definitions + limits); "columns_only" gives just
+    table/column names, for the semantic-layer ablation in the eval."""
     messages = [{"role": "user", "content": question}]
     calls: list[SqlCall] = []
     in_tok = out_tok = 0
@@ -115,17 +119,27 @@ def run_agent(question: str, db: SafeDB, client, model: str = DEFAULT_MODEL, max
         messages.append({"role": "assistant", "content": resp.content})
         results = []  # all tool results go back in ONE user message
         for tu in tool_uses:
-            results.append(_execute_tool(tu, db, calls))
+            results.append(_execute_tool(tu, db, calls, schema_mode))
         messages.append({"role": "user", "content": results})
 
     return AgentResult("I could not complete this within the step limit.", calls, max_steps,
                        "max_steps", in_tok, out_tok)
 
 
-def _execute_tool(tu, db: SafeDB, calls: list[SqlCall]) -> dict:
+def _columns_only_doc(db: SafeDB) -> str:
+    from .guardrails import ALLOWED_TABLES
+    lines = []
+    for t in sorted(ALLOWED_TABLES):
+        cols = ", ".join(f"{r[0]} {r[1]}" for r in db.con.execute(f"describe {t}").fetchall())
+        lines.append(f"{t}({cols})")
+    return "Tables:\n" + "\n".join(lines)
+
+
+def _execute_tool(tu, db: SafeDB, calls: list[SqlCall], schema_mode: str = "full") -> dict:
     if tu.name == "get_schema":
         info = db.data_as_of()
-        text = f"{SCHEMA_DOC}\n\ndata_as_of: first admission {info['first_admission']}, " \
+        doc = SCHEMA_DOC if schema_mode == "full" else _columns_only_doc(db)
+        text = f"{doc}\n\ndata_as_of: first admission {info['first_admission']}, " \
                f"latest admission {info['last_admission']}"
         return {"type": "tool_result", "tool_use_id": tu.id, "content": text}
     if tu.name == "run_sql":

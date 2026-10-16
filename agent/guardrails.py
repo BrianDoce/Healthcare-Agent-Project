@@ -101,12 +101,15 @@ def _row_level_reason(select: exp.Select, ctes: dict, depth: int = 0) -> str | N
                    (isinstance(p, exp.Column) and isinstance(p.this, exp.Star)) for p in select.expressions)
     aggregated = any(isinstance(n, exp.AggFunc) for n in select.walk()) or         bool(select.args.get("group")) or bool(select.args.get("distinct"))
     derived_ok = bool(sources)
+    # Inspect derived sources only when this select passes their columns through (SELECT *) or is not
+    # itself aggregating. An aggregating outer query may legitimately read ids inside a subquery.
+    recurse = has_star or not aggregated
     for src in sources:
         if isinstance(src, exp.Table):
             name = (src.name or "").lower()
             if name in ctes:
                 sub = _final_select(ctes[name])
-                sub_reason = _row_level_reason(sub, ctes, depth + 1) if sub is not None else None
+                sub_reason = _row_level_reason(sub, ctes, depth + 1) if (sub is not None and recurse) else None
                 if sub_reason:
                     return sub_reason
             else:
@@ -116,7 +119,7 @@ def _row_level_reason(select: exp.Select, ctes: dict, depth: int = 0) -> str | N
                             "name non-identifier columns explicitly.")
         elif isinstance(src, exp.Subquery) and isinstance(src.this, (exp.Select, exp.Union)):
             sub = _final_select(src.this)
-            sub_reason = _row_level_reason(sub, ctes, depth + 1) if sub is not None else None
+            sub_reason = _row_level_reason(sub, ctes, depth + 1) if (sub is not None and recurse) else None
             if sub_reason:
                 return sub_reason
         else:

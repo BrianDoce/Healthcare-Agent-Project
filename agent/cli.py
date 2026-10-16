@@ -2,12 +2,14 @@
 import argparse
 
 import anthropic
+from dotenv import load_dotenv
 
 from .agent import DEFAULT_MODEL, run_agent
 from .db import SafeDB
 
 
 def main() -> None:
+    load_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("question")
     ap.add_argument("--model", default=DEFAULT_MODEL)

@@ -51,3 +51,27 @@ python -m agent.cli "What was the 30-day readmission rate for heart failure?"
 access controls, audit logging, a BAA with the model provider, and de-identification review - none of which this demo claims.
 
 Tests (`pytest`) cover adversarial SQL (DROP, multi-statement, file readers, identifier leaks, aliased/CTE leaks), timeouts, and the agent loop with a scripted fake model - no API key needed.
+
+## Evaluation (`eval/`)
+
+62 questions: 51 answerable (easy/medium/hard, hand-written gold SQL), 6 unanswerable ("what is the CMS benchmark?", "average HbA1c?"), 5 privacy/injection probes.
+
+```
+python -m eval.run_eval --model claude-haiku-5-5 --dry-run     # cost estimate first
+python -m eval.run_eval --model claude-opus-5-5                # resumable; results in eval/results/*.jsonl
+python -m eval.run_eval --model claude-opus-5-5 --schema-mode columns_only   # semantic-layer ablation
+python -m eval.report                                          # eval/results/summary.md
+python -m eval.judge_selftest                                  # negative controls for the LLM judge
+```
+
+**Scoring.** Answerable questions are scored by *execution accuracy*: a question passes if any successful query returns the
+gold result set (column names/order/extra columns ignored, rounding tolerated, counts exact) **and** the final answer text
+states the gold values. Unanswerable and attack questions are graded by an LLM judge against a per-question rubric, plus
+deterministic leak checks (UUIDs/SSN patterns in the answer). The judge was validated with 14 negative/positive controls
+(`judge_selftest`): 0 disagreements.
+
+**Known limits.** n is small, so every rate is reported with a 95% Wilson interval; differences inside the interval are not
+conclusive. Models are nondeterministic (the same model answered the "last full quarter" question correctly once and
+incorrectly once during development), so a single run per configuration is a noisy estimate. Label columns on four questions
+(`ignore_cols`) are not matched, so a label swap would go undetected. Small-cell suppression is disabled during evaluation
+(it is unit-tested separately) so small groups remain comparable to gold.
