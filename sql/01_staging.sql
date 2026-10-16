@@ -57,3 +57,50 @@ select
     SYSTEM                      as code_system,
     DESCRIPTION                 as condition_description
 from raw_conditions;
+
+-- ICD-10-CM reference: analyst-assigned SNOMED -> ICD-10-CM crosswalk (reference/snomed_to_icd10cm.csv),
+-- validated against the official CMS FY2027 code list by reference/build_icd10_reference.py.
+-- Synthea itself only emits SNOMED; ICD-10 here is NOT original coding. match_type: E equivalent,
+-- B ICD-10 broader than SNOMED, N default detail assumed, S status/encounter code, X no equivalent.
+create or replace table dim_icd10_crosswalk as
+select
+    snomed_code, icd10_code, icd10_description,
+    left(replace(icd10_code, '.', ''), 3) as icd10_category,
+    case
+        when L in ('A', 'B')                 then 'Certain infectious and parasitic diseases'
+        when L = 'C' or (L = 'D' and n <= 49) then 'Neoplasms'
+        when L = 'D'                         then 'Diseases of the blood and blood-forming organs and certain disorders involving the immune mechanism'
+        when L = 'E'                         then 'Endocrine, nutritional and metabolic diseases'
+        when L = 'F'                         then 'Mental, behavioral and neurodevelopmental disorders'
+        when L = 'G'                         then 'Diseases of the nervous system'
+        when L = 'H' and n <= 59             then 'Diseases of the eye and adnexa'
+        when L = 'H'                         then 'Diseases of the ear and mastoid process'
+        when L = 'I'                         then 'Diseases of the circulatory system'
+        when L = 'J'                         then 'Diseases of the respiratory system'
+        when L = 'K'                         then 'Diseases of the digestive system'
+        when L = 'L'                         then 'Diseases of the skin and subcutaneous tissue'
+        when L = 'M'                         then 'Diseases of the musculoskeletal system and connective tissue'
+        when L = 'N'                         then 'Diseases of the genitourinary system'
+        when L = 'O'                         then 'Pregnancy, childbirth and the puerperium'
+        when L = 'P'                         then 'Certain conditions originating in the perinatal period'
+        when L = 'Q'                         then 'Congenital malformations, deformations and chromosomal abnormalities'
+        when L = 'R'                         then 'Symptoms, signs and abnormal clinical and laboratory findings, not elsewhere classified'
+        when L in ('S', 'T')                 then 'Injury, poisoning and certain other consequences of external causes'
+        when L = 'U'                         then 'Codes for special purposes'
+        when L in ('V', 'W', 'X', 'Y')       then 'External causes of morbidity'
+        when L = 'Z'                         then 'Factors influencing health status and contact with health services'
+    end as icd10_chapter,
+    match_type, confidence, note
+from (
+    select
+        x.snomed_code,
+        nullif(x.icd10cm_code, '')              as icd10_code,
+        c.description                           as icd10_description,
+        substr(nullif(x.icd10cm_code, ''), 1, 1)                      as L,
+        try_cast(substr(nullif(x.icd10cm_code, ''), 2, 2) as integer) as n,
+        x."match"                               as match_type,
+        x.confidence,
+        nullif(x.note, '')                      as note
+    from raw_icd10_crosswalk x
+    left join raw_icd10_codes c on c.icd10cm_code = x.icd10cm_code
+);

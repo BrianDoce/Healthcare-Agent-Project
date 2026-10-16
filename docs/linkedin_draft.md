@@ -8,10 +8,10 @@ What I built (all on synthetic Synthea data, no real PHI):
 - A SQL pipeline: raw patient records -> cleaned tables -> a 30-day readmission measure using window functions
 - A Claude-powered agent that writes read-only SQL, with a "semantic layer" so it uses the right definition of a readmission
 - Layered guardrails: SQL parsing, a read-only database with file access off, and a backstop that blocks any patient identifier from leaving
-- A 62-question evaluation with hand-written gold SQL
+- A 68-question evaluation with hand-written gold SQL, plus an ICD-10-CM layer built from a hand-made, officially-validated crosswalk
 
 What I measured:
-- 92% (Haiku) and 90% (Sonnet) on answerable questions; the gap is inside the noise, but Haiku is ~17x cheaper
+- 86% (Haiku, strict scoring) on answerable questions after adding ICD-10; on the earlier SNOMED-only set Haiku and Sonnet scored 92% vs 90%: inside the noise, but Haiku is ~17x cheaper
 - Both declined every question the data can't answer (ICD-10 codes, labs, national benchmarks) instead of inventing a number
 - Most errors weren't bad SQL: they were the agent returning the top 5 when asked "which one"
 

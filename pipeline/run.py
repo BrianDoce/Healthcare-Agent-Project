@@ -11,13 +11,17 @@ ROOT = Path(__file__).resolve().parent.parent
 SQL_DIR = ROOT / "sql"
 RAW_TABLES = ["patients", "encounters", "conditions", "organizations", "payers"]
 # Tables handed to Power BI / Tableau / anyone who wants flat files.
-EXPORT_TABLES = ["dim_patient", "dim_facility", "admissions", "readmissions_30d", "condition_groups"]
+EXPORT_TABLES = ["dim_patient", "dim_facility", "admissions", "readmissions_30d", "condition_groups",
+                 "dim_icd10_crosswalk"]
+REFERENCE_DIR = ROOT / "reference"
+REFERENCE_TABLES = {"icd10_crosswalk": "snomed_to_icd10cm.csv", "icd10_codes": "icd10cm_codes_used.csv"}
 
 
 def ingest(con, raw_dir: Path) -> None:
     """Load each CSV as all-varchar so malformed values can't fail the load."""
-    for name in RAW_TABLES:
-        path = raw_dir / f"{name}.csv"
+    sources = {name: raw_dir / f"{name}.csv" for name in RAW_TABLES}
+    sources.update({name: REFERENCE_DIR / fname for name, fname in REFERENCE_TABLES.items()})
+    for name, path in sources.items():
         con.execute(
             f"create or replace table raw_{name} as "
             f"select * from read_csv(?, all_varchar=true, header=true)",
@@ -48,6 +52,13 @@ def data_quality(con) -> list[tuple[str, int, str]]:
             " - (select count(*) from admissions)",
         "conditions with no matching encounter":
             "select count(*) from stg_conditions c anti join stg_encounters e using (encounter_id)",
+        "admissions whose SNOMED reason has no crosswalk row":
+            "select count(*) from admissions a where a.reason_code is not null"
+            " and not exists (select 1 from dim_icd10_crosswalk x where x.snomed_code = a.reason_code)",
+        "admissions with a reason but no ICD-10 code (match X)":
+            "select count(*) from admissions where reason_code is not null and icd10_code is null",
+        "disorder conditions with no crosswalk row":
+            "select count(*) from condition_groups where icd10_match is null",
     }
     return [(n, (v := con.execute(q).fetchone()[0]), "OK" if v == 0 else "REVIEW")
             for n, q in checks.items()]

@@ -30,11 +30,17 @@ select
     end                                                     as age_group,
     e.reason_code,
     coalesce(e.reason_description, 'Unspecified')           as principal_reason,
+    x.icd10_code,
+    x.icd10_description,
+    x.icd10_category,
+    x.icd10_chapter,
+    x.match_type                                            as icd10_match,
     e.total_claim_cost,
     (p.death_date is not null
         and p.death_date between e.start_ts::date and e.stop_ts::date) as died_during_stay
 from stg_encounters e
 join stg_patients p using (patient_id)
+left join dim_icd10_crosswalk x on x.snomed_code = e.reason_code
 where e.encounter_class = 'inpatient'
   and e.start_ts is not null
   and e.stop_ts is not null
@@ -54,7 +60,8 @@ with sequenced as (
 )
 select
     encounter_id, patient_id, organization_id, admit_ts, discharge_ts, length_of_stay_days,
-    age_at_admission, age_group, principal_reason, reason_code, total_claim_cost,
+    age_at_admission, age_group, principal_reason, reason_code,
+    icd10_code, icd10_description, icd10_category, icd10_chapter, icd10_match, total_claim_cost,
     next_encounter_id,
     date_diff('day', discharge_ts::date, next_admit_ts::date) as days_to_next_admit,
     coalesce(date_diff('day', discharge_ts::date, next_admit_ts::date) between 0 and 30, false)
@@ -62,20 +69,21 @@ select
 from sequenced
 where not died_during_stay;
 
--- Chronic-condition flag for the prevalence dashboard. Synthea codes conditions in SNOMED, so
--- groups are assigned by description keyword; documented as a simplification in the README.
+-- Chronic-condition groups for the prevalence dashboard, defined by ICD-10-CM category (via the
+-- analyst-assigned crosswalk): E08-E13 diabetes, I10-I16 hypertension, J43-J44 COPD, I50 heart failure,
+-- N18 chronic kidney disease (incl. ESRD), J45 asthma.
 create or replace table condition_groups as
 select
     c.patient_id, c.condition_code, c.condition_description, c.onset_date,
+    x.icd10_code, x.icd10_description, x.icd10_category, x.icd10_chapter, x.match_type as icd10_match,
     case
-        when condition_description ilike '%diabetes%'                           then 'Diabetes'
-        when condition_description ilike '%hypertension%'                       then 'Hypertension'
-        when condition_description ilike '%COPD%'
-          or condition_description ilike '%chronic obstructive%'
-          or condition_description ilike '%emphysema%'                          then 'COPD'
-        when condition_description ilike '%heart failure%'                      then 'Heart failure'
-        when condition_description ilike '%chronic kidney%'                     then 'Chronic kidney disease'
-        when condition_description ilike '%asthma%'                             then 'Asthma'
+        when x.icd10_category in ('E08', 'E09', 'E10', 'E11', 'E13')            then 'Diabetes'
+        when x.icd10_category in ('I10', 'I11', 'I12', 'I13', 'I15', 'I16')     then 'Hypertension'
+        when x.icd10_category in ('J43', 'J44')                                 then 'COPD'
+        when x.icd10_category = 'I50'                                           then 'Heart failure'
+        when x.icd10_category = 'N18'                                           then 'Chronic kidney disease'
+        when x.icd10_category = 'J45'                                           then 'Asthma'
     end as chronic_group
 from stg_conditions c
-where condition_description ilike '%(disorder)%';
+left join dim_icd10_crosswalk x on x.snomed_code = c.condition_code
+where c.condition_description ilike '%(disorder)%';

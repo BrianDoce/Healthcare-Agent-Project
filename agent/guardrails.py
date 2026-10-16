@@ -10,7 +10,8 @@ import re
 import sqlglot
 from sqlglot import exp
 
-ALLOWED_TABLES = {"admissions", "readmissions_30d", "dim_patient", "dim_facility", "condition_groups"}
+ALLOWED_TABLES = {"admissions", "readmissions_30d", "dim_patient", "dim_facility", "condition_groups",
+                  "dim_icd10_crosswalk"}
 ROW_LEVEL_TABLES = {"admissions", "readmissions_30d", "dim_patient", "condition_groups"}
 # Row-level identifiers may be used inside aggregates (COUNT(DISTINCT patient_id)) but never returned.
 IDENTIFIER_COLUMNS = {"patient_id", "encounter_id", "next_encounter_id"}
@@ -101,6 +102,7 @@ def _row_level_reason(select: exp.Select, ctes: dict, depth: int = 0) -> str | N
                    (isinstance(p, exp.Column) and isinstance(p.this, exp.Star)) for p in select.expressions)
     aggregated = any(isinstance(n, exp.AggFunc) for n in select.walk()) or         bool(select.args.get("group")) or bool(select.args.get("distinct"))
     derived_ok = bool(sources)
+    touches_row_level = False   # reference tables (the ICD-10 crosswalk) hold no patient records
     # Inspect derived sources only when this select passes their columns through (SELECT *) or is not
     # itself aggregating. An aggregating outer query may legitimately read ids inside a subquery.
     recurse = has_star or not aggregated
@@ -114,6 +116,7 @@ def _row_level_reason(select: exp.Select, ctes: dict, depth: int = 0) -> str | N
                     return sub_reason
             else:
                 derived_ok = False
+                touches_row_level = touches_row_level or name in ROW_LEVEL_TABLES
                 if has_star and name in ROW_LEVEL_TABLES:
                     return ("SELECT * returns row-level records. Aggregate (COUNT, AVG, ...) or "
                             "name non-identifier columns explicitly.")
@@ -124,7 +127,7 @@ def _row_level_reason(select: exp.Select, ctes: dict, depth: int = 0) -> str | N
                 return sub_reason
         else:
             derived_ok = False
-    if not aggregated and not derived_ok:
+    if not aggregated and not derived_ok and touches_row_level:
         return ("Row-level output is not allowed. Use aggregates (COUNT/AVG/SUM) with GROUP BY, "
                 "or SELECT DISTINCT.")
     return None
