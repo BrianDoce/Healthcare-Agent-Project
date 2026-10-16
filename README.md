@@ -11,6 +11,8 @@ measures it.
 **Data:** [Synthea](https://synthetichealth.github.io/synthea/) synthetic patients (5,733 patients, 5,670 inpatient
 admissions, Massachusetts). No real PHI anywhere in this repository.
 
+![Streamlit app answering "Which age group has the highest readmission rate?" with the answer, results table, SQL, and cost](docs/demo.png)
+
 ## Results
 
 A question counts as correct only if a query returns the gold result set **and** the final answer states it (strict:
