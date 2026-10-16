@@ -31,3 +31,23 @@ python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m pipeline.run
 .venv\Scripts\python -m pytest
 ```
+
+## NL -> SQL agent (`agent/`)
+
+Ask questions in English; Claude writes and runs read-only SQL against the marts and answers from the results.
+
+```
+export ANTHROPIC_API_KEY=...     # PowerShell: $env:ANTHROPIC_API_KEY = "..."
+python -m agent.cli "What was the 30-day readmission rate for heart failure?"
+```
+
+| Layer | Where | What |
+|---|---|---|
+| Semantic layer | `agent/schema.md` | Tables, columns, and business definitions (what a "readmission" is, how relative dates work, what is *not* available) |
+| Agent loop | `agent/agent.py` | Manual tool-use loop (`get_schema`, `run_sql`), step cap, full trace of every SQL attempt for evaluation |
+| Guardrails | `agent/guardrails.py`, `agent/db.py` | SELECT-only AST validation (sqlglot), table allow-list, no file/URL functions, no row-level identifiers, read-only connection with external access disabled, row limit, timeout, UUID result backstop, small-cell suppression (<11) |
+
+**Privacy design:** synthetic data only; aggregate-only outputs by construction. A real deployment on PHI would additionally need
+access controls, audit logging, a BAA with the model provider, and de-identification review - none of which this demo claims.
+
+Tests (`pytest`) cover adversarial SQL (DROP, multi-statement, file readers, identifier leaks, aliased/CTE leaks), timeouts, and the agent loop with a scripted fake model - no API key needed.
